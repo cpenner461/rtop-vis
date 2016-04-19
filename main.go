@@ -26,6 +26,7 @@ THE SOFTWARE.
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -39,7 +40,8 @@ import (
 const (
 	VERSION          = "0.1"
 	DEFAULT_REFRESH  = 5 // default refresh interval in seconds
-	DEFAULT_WEB_ADDR = "0.0.0.0:8080"
+	DEFAULT_ADDR     = "0.0.0.0"
+	DEFAULT_PORT     = 8080
 	HISTORY_LENGTH   = 10 * 60 / DEFAULT_REFRESH // for 10 minutes
 )
 
@@ -47,6 +49,7 @@ var (
 	currentUser   *user.User
 	sshConfigRead bool
 	allStats      *HostStats
+	usernameFlag  string
 )
 
 func usage(code int) {
@@ -54,10 +57,15 @@ func usage(code int) {
 		`rtop-vis %s - (c) 2015 RapidLoop - MIT Licensed - http://rtop-monitor.org/rtop-vis
 rtop-vis monitors system stats for a cluster over SSH
 
-Usage: rtop-vis host [host ...]
+Usage: rtop-vis host [OPTIONS] [host ...]
 
     host
         one or more host to monitor, "ssh host" should work without password
+
+Options:
+
+  --port=      Port to listen on. Default 8080
+  --username=  Username to ssh as. Default from ssh config
 
 After invoking, web UI will be available on http://localhost:8080/. Stats will
 be collected every 5 seconds and graphs will refresh every 10 seconds. Graphs
@@ -68,8 +76,16 @@ will show 10 minutes of history.
 
 func main() {
 
-	if len(os.Args) == 1 {
+	var port = flag.Int("port", DEFAULT_PORT, "port to listen on")
+	var username = flag.String("username", "", "username to connect as")
+	flag.Parse()
+
+	if len(flag.Args()) == 0 {
 		usage(1)
+	}
+
+	if len(*username) > 0 {
+		usernameFlag = *username
 	}
 
 	log.SetPrefix("rtop-vis: ")
@@ -91,12 +107,12 @@ func main() {
 
 	// start connecting
 	allStats = NewHostStats(HISTORY_LENGTH)
-	for _, host := range os.Args[1:] {
+	for _, host := range flag.Args() {
 		go doHost(host)
 	}
 
 	// start the web server
-	go startWeb()
+	go startWeb(*port)
 
 	// wait for ^C
 	ch := make(chan os.Signal, 1)
@@ -132,6 +148,9 @@ func doHost(host string) {
 			key = skey
 		}
 	}
+	if len(usernameFlag) > 0 {
+		username = usernameFlag
+	}
 
 	// fill in still-unknown ones with defaults
 	if port == 0 {
@@ -148,6 +167,7 @@ func doHost(host string) {
 	}
 
 	addr := fmt.Sprintf("%s:%d", host, port)
+	fmt.Println("Connecting to [", addr, "] with username [", username, "]")
 	client := sshConnect(username, addr, key)
 	if client == nil {
 		return
